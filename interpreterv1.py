@@ -17,13 +17,25 @@ class Interpreter(InterpreterBase):
                 "No main() function was found",
             )
         
+    def get_var(self, name):
+        if name not in self.var_to_val:
+            super().error(
+                ErrorType.NAME_ERROR,
+                f"Variable {name} has not been defined",
+            )
+        else:
+            return self.var_to_val[name]
+    
+    def set_var(self, name, val):
+        self.var_to_val[name] = val
+        
     def parse_args(self, args):
         parsed = []
         for arg in args:
             if arg.elem_type == '+' or arg.elem_type == '-' or arg.elem_type == 'fcall':
                 parsed.append(self.execute_expression(arg))
             elif arg.elem_type == 'var':
-                parsed.append(self.var_to_val[arg.get('name')])
+                parsed.append(self.get_var(arg.get('name')))
             else:
                 parsed.append(arg.get('val'))
         return parsed
@@ -42,9 +54,12 @@ class Interpreter(InterpreterBase):
                 f"No inputi() function found that takes > 1 parameter",
             )
             return
-        elif len(args == 1):
+        elif len(args) == 1:
             super().output(args)
-            user_input = super().get_input()
+            user_input = int(super().get_input())
+            return user_input
+        else:
+            user_input = int(super().get_input())
             return user_input
 
     def call_function(self, name, args):
@@ -95,20 +110,25 @@ class Interpreter(InterpreterBase):
             if expr.dict['op1'].elem_type == 'int' or expr.dict['op1'].elem_type == 'string':
                 op1 = expr.dict['op1'].dict['val']
             elif expr.dict['op1'].elem_type == 'var':
-                op1 = self.var_to_val[expr.dict['op1'].dict['name']]
+                op1 = self.get_var(expr.dict['op1'].dict['name'])
             else:
                 op1 = self.execute_expression(expr.dict['op1'])
             
             if expr.dict['op2'].elem_type == 'int' or expr.dict['op2'].elem_type == 'string':
                 op2 = expr.dict['op2'].dict['val']
             elif expr.dict['op2'].elem_type == 'var':
-                op2 = self.var_to_val[expr.dict['op2'].dict['name']]
+                op2 = self.get_var(expr.dict['op2'].dict['name'])
             else:
                 op2 = self.execute_expression(expr.dict['op2'])
             
             return operator(op1, op2)
         #For some reason this is only going to be the inputi function
         else:
+            if expr.get('name') != 'inputi':
+                super().error(
+                    ErrorType.FAULT_ERROR,
+                    "You can't call anything but inputi from an expression",
+                )
             #TODO: process args first before passing? not anymore since I have the parse args function?
             return self.call_function(expr.get('name'), expr.get('args'))
 
@@ -116,13 +136,13 @@ class Interpreter(InterpreterBase):
 
     def execute_assignment(self, assn):
         if assn.dict['expression'].elem_type == '+' or assn.dict['expression'].elem_type == '-' or assn.dict['expression'].elem_type == 'fcall':
-            self.var_to_val[assn.get('name')] = self.execute_expression(assn.dict['expression'])
+            self.set_var(assn.get('name'), self.execute_expression(assn.dict['expression']))
             return 
         if assn.dict['expression'].elem_type == 'var':
-            self.var_to_val[assn.dict['name']] = self.var_to_val[assn.dict['expression'].dict['name']]
+            self.set_var(assn.dict['name'], self.get_var(assn.dict['expression'].dict['name']))
             return
         if assn.dict['expression'].elem_type == 'int' or assn.dict['expression'].elem_type == 'string':
-            self.var_to_val[assn.dict['name']] = assn.dict['expression'].dict['val']
+            self.set_var(assn.dict['name'], assn.dict['expression'].dict['val'])
             return
 
 
@@ -145,7 +165,7 @@ class Interpreter(InterpreterBase):
     
 def main():
     program = """func main() {
-             x = 5 + 6;
+             x = 4 + inputi("enter a number: ");
              print("The sum is: ", x);
           }"""
     interpreter = Interpreter()
