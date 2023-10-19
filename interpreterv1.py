@@ -48,23 +48,41 @@ class Interpreter(InterpreterBase):
             return user_input
 
     def call_function(self, name, args):
+        #THIS IS A BAD WAY TO CALL FUNCTIONS
+        #TODO: FIX
         parsed = self.parse_args(args)
         if name == 'print':
             self.brew_print(parsed)
             return
-        if name == 'inputi':
+        elif name == 'inputi':
             return self.brew_input(parsed)
+        else:
+            super().error(
+                ErrorType.NAME_ERROR,
+                f"Function {name} has not been defined",
+            )
 
     def execute_function(self, func):
         for statement in func.dict['statements']:
             self.execute_statement(statement) 
 
     def subtract(self, op1, op2):
-        return op1 - op2
+        if type(op1) == type(op2):
+            return op1 - op2
+        else:
+            super().error(
+                ErrorType.TYPE_ERROR,
+                "Incompatible types for arithmetic operation",
+            )
     
     def add(self, op1, op2):
-        return op1 + op2
-
+        if type(op1) == type(op2):
+            return op1 + op2
+        else:
+            super().error(
+                ErrorType.TYPE_ERROR,
+                "Incompatible types for arithmetic operation",
+            )
 
     def execute_expression(self, expr):
         if expr.elem_type == '+' or expr.elem_type == '-':
