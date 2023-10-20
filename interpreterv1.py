@@ -55,7 +55,7 @@ class Interpreter(InterpreterBase):
             )
             return
         elif len(args) == 1:
-            super().output(args)
+            super().output(args[0])
             user_input = int(super().get_input())
             return user_input
         else:
