@@ -3,10 +3,13 @@ from brewparse import parse_program
 
 
 class Interpreter(InterpreterBase):
+    #Initialize the base class with the flag for debug
     def __init__(self, console_output=True, inp=None, trace_output=False):
         super().__init__(console_output, inp)
         self.debug = trace_output
 
+    # Given an AST:
+    # Check if the main function exists
     def main_check(self, ast):
         for func in ast.dict['functions']:
             if func.dict['name'] == "main":
@@ -17,6 +20,7 @@ class Interpreter(InterpreterBase):
                 "No main() function was found",
             )
         
+    # Get the value of a variable if it exists
     def get_var(self, name):
         if name not in self.var_to_val:
             super().error(
@@ -26,9 +30,11 @@ class Interpreter(InterpreterBase):
         else:
             return self.var_to_val[name]
     
+    # Set a variable
     def set_var(self, name, val):
         self.var_to_val[name] = val
         
+    # Given a list of arguments, process all of them if they can be processed
     def parse_args(self, args):
         parsed = []
         for arg in args:
@@ -40,6 +46,7 @@ class Interpreter(InterpreterBase):
                 parsed.append(arg.get('val'))
         return parsed
 
+    # The implementation of the print() function
     def brew_print(self, args):
         output = ""
         for arg in args:
@@ -47,6 +54,7 @@ class Interpreter(InterpreterBase):
         super().output(output)
         return
     
+    # The implementation of inputi()
     def brew_input(self, args):
         if len(args) > 1:
             super().error(
@@ -62,6 +70,7 @@ class Interpreter(InterpreterBase):
             user_input = int(super().get_input())
             return user_input
 
+    # Function for handling brewin function calls
     def call_function(self, name, args):
         #THIS IS A BAD WAY TO CALL FUNCTIONS
         #TODO: FIX
@@ -77,10 +86,12 @@ class Interpreter(InterpreterBase):
                 f"Function {name} has not been defined",
             )
 
+    # Execute a function node
     def execute_function(self, func):
         for statement in func.dict['statements']:
             self.execute_statement(statement) 
 
+    # The subtraction operator
     def subtract(self, op1, op2):
         if type(op1) == type(op2):
             return op1 - op2
@@ -90,6 +101,7 @@ class Interpreter(InterpreterBase):
                 "Incompatible types for arithmetic operation",
             )
     
+    # The addition operator
     def add(self, op1, op2):
         if type(op1) == type(op2):
             return op1 + op2
@@ -99,6 +111,7 @@ class Interpreter(InterpreterBase):
                 "Incompatible types for arithmetic operation",
             )
 
+    # Execute an expression
     def execute_expression(self, expr):
         if expr.elem_type == '+' or expr.elem_type == '-':
             operator = None
@@ -129,11 +142,10 @@ class Interpreter(InterpreterBase):
                     ErrorType.FAULT_ERROR,
                     "You can't call anything but inputi from an expression",
                 )
-            #TODO: process args first before passing? not anymore since I have the parse args function?
             return self.call_function(expr.get('name'), expr.get('args'))
 
             
-
+    # Execute an assignemnt operator
     def execute_assignment(self, assn):
         if assn.dict['expression'].elem_type == '+' or assn.dict['expression'].elem_type == '-' or assn.dict['expression'].elem_type == 'fcall':
             self.set_var(assn.get('name'), self.execute_expression(assn.dict['expression']))
@@ -145,7 +157,7 @@ class Interpreter(InterpreterBase):
             self.set_var(assn.dict['name'], assn.dict['expression'].dict['val'])
             return
 
-
+    # Execute a statement
     def execute_statement(self, statement):
         if statement.elem_type == '=':
             return self.execute_assignment(statement)
@@ -153,6 +165,7 @@ class Interpreter(InterpreterBase):
         elif statement.elem_type == 'fcall':
             return self.call_function(statement.get('name'), statement.get('args'))
 
+    # Run a program
     def run(self, program):
         ast = parse_program(program)
         self.var_to_val = {}
