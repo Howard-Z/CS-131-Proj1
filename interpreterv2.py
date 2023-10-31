@@ -37,17 +37,19 @@ class Interpreter(InterpreterBase):
         
     # Get the value of a variable if it exists
     def get_var(self, name):
-        if name not in self.var_to_val:
+        val = self.env.get(name)
+        if val == None:
             super().error(
                 ErrorType.NAME_ERROR,
                 f"Variable {name} has not been defined",
             )
         else:
-            return self.var_to_val[name]
+            return val
     
     # Set a variable
-    def set_var(self, name, val):
-        self.var_to_val[name] = val
+    def set_var(self, name, val, is_param = False):
+        self.env.set(name, val, is_param)
+        #self.var_to_val[name] = val
         
     # Given a list of arguments, process all of them if they can be processed
     def parse_args(self, args):
@@ -117,27 +119,42 @@ class Interpreter(InterpreterBase):
         parsed = self.parse_args(args)
         if name == 'print':
             self.brew_print(parsed)
-            return
+            #self.env.exit_block()
+            return None
         elif name == 'inputi':
+            #self.env.exit_block()
             return self.brew_input(parsed)
         elif self.function_check(name):
+            #this placement of new_block() causes weird things
+            self.env.new_block()
             func = self.overload_check(name, len(args))
             #should add the arguments to the master list of vars here
             for i in range(len(args)):
-                self.set_var(func.get('args')[i].get('name'), parsed[i])
+                self.set_var(func.get('args')[i].get('name'), parsed[i], True)
             #TODO FUNCTION THINGS HERE AND SCOPING
-            self.execute_function(func)
-            pass
+            val = self.execute_function(func)
+            self.env.exit_block()
+            return val
+            
         else:
             super().error(
                 ErrorType.NAME_ERROR,
                 f"Function {name} has not been defined",
             )
+        #self.env.exit_block()
 
     # Execute a function node
     def execute_function(self, func):
+        # This seems a little hacky
+        output = None
+        if self.debug:
+            print(self.env.is_ret())
         for statement in func.dict['statements']:
-            self.execute_statement(statement) 
+            if not self.env.is_ret():
+                self.execute_statement(statement)
+            else:
+                self.env.set_ret(False)
+                return output
 
     # The subtraction operator
     def subtract(self, op1, op2):
@@ -399,20 +416,34 @@ class Interpreter(InterpreterBase):
             return self.call_function(statement.get('name'), statement.get('args'))
         
         elif statement.elem_type == 'if':
+            self.env.new_block()
+            if type(self.execute_expression(statement.get('condition'))) != bool:
+                super().error(
+                    ErrorType.TYPE_ERROR,
+                    "Incompatible type for if conditional",
+                )
             if self.execute_expression(statement.get('condition')):
                 for true_statement in statement.get('statements'):
                     self.execute_statement(true_statement)
-            else:
+            elif statement.get('else_statements') != None:
                 for false_statement in statement.get('else_statements'):
                     self.execute_statement(false_statement)
+            self.env.exit_block()
 
         elif statement.elem_type == 'while':
+            self.env.new_block()
             while self.execute_expression(statement.get('condition')):
                 for while_statements in statement.get('statements'):
                     self.execute_statement(while_statements)
+            self.env.exit_block()
             
         elif statement.elem_type == 'return':
-            return self.execute_expression(statement.get('expression'))
+            #self.env.exit_block()
+            self.env.set_ret(True)
+            if statement.get('expression') != None:
+                return self.execute_expression(statement.get('expression'))
+            else:
+                return None
         
 
 
@@ -420,13 +451,15 @@ class Interpreter(InterpreterBase):
     
 def main():
     program = """func main() {
-  foo(5);
+  a = foo(5);
+  print(a);
 }
 
 func foo(a) {
-  print(a);
-}"""
-    interpreter = Interpreter(trace_output= False)
+    return a;
+}
+"""
+    interpreter = Interpreter(trace_output= True)
     interpreter.run(program)
 
 if __name__ == '__main__':
