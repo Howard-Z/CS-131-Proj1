@@ -466,19 +466,3 @@ class Interpreter(InterpreterBase):
 
 
 
-    
-def main():
-    program = """func main() {
-  print(fact(5));
-}
-
-func fact(n) {
-  if (n <= 1) { return 1; }
-  return n * fact(n-1);
-}
-"""
-    interpreter = Interpreter(trace_output= True)
-    interpreter.run(program)
-
-if __name__ == '__main__':
-    main()
