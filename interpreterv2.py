@@ -410,6 +410,17 @@ class Interpreter(InterpreterBase):
             self.set_var(assn.dict['name'], assn.dict['expression'].dict['val'])
             return
 
+    def loop_conditional(self, conditional):
+        output = self.execute_expression(conditional)
+        if type(output) != bool:
+            super.error(
+                ErrorType.TYPE_ERROR,
+                "Not boolean expression in conditional check"
+            )
+            return None
+        return output
+
+
     # Execute a statement
     def execute_statement(self, statement):
         if statement.elem_type == '=':
@@ -444,13 +455,16 @@ class Interpreter(InterpreterBase):
         elif statement.elem_type == 'while':
             output = None
             self.env.new_block()
-            while self.execute_expression(statement.get('condition')):
+            # if not explicitly a boolean, error out
+            # while self.execute_expression(statement.get('condition')):
+            while self.loop_conditional(statement.get('condition')):
                 for while_statements in statement.get('statements'):
                     output = self.execute_statement(while_statements)
                     if self.env.is_ret():
                         self.env.exit_block()
                         return output
             self.env.exit_block()
+            return None
             
         elif statement.elem_type == 'return':
             #self.env.exit_block()
@@ -462,7 +476,7 @@ class Interpreter(InterpreterBase):
             else:
                 self.env.set_ret(True)
                 return None
-        
+        return None
 
 
 
