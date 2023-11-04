@@ -36,8 +36,8 @@ class Interpreter(InterpreterBase):
         
     # Get the value of a variable if it exists
     def get_var(self, name):
-        val = self.env.get(name)
-        if val == None:
+        val, status = self.env.get(name)
+        if status == False:
             super().error(
                 ErrorType.NAME_ERROR,
                 f"Variable {name} has not been defined",
@@ -48,7 +48,6 @@ class Interpreter(InterpreterBase):
     # Set a variable
     def set_var(self, name, val, is_param = False):
         self.env.set(name, val, is_param)
-        #self.var_to_val[name] = val
         
     # Given a list of arguments, process all of them if they can be processed
     def parse_args(self, args):
@@ -79,20 +78,20 @@ class Interpreter(InterpreterBase):
         return
     
     # The implementation of inputi()
-    def brew_input(self, args):
+    def brew_input(self, args, is_inputi):
         if len(args) > 1:
             super().error(
                 ErrorType.NAME_ERROR,
                 f"No inputi() function found that takes > 1 parameter",
             )
             return
-        elif len(args) == 1:
+        if len(args) == 1:
             super().output(args[0])
-            user_input = int(super().get_input())
-            return user_input
-        else:
-            user_input = int(super().get_input())
-            return user_input
+
+        user_input = super().get_input()
+        if is_inputi:
+            return int(user_input)
+        return str(user_input)
 
     #overload check
     def overload_check(self, name, num_args):
@@ -118,16 +117,13 @@ class Interpreter(InterpreterBase):
         parsed = self.parse_args(args)
         if name == 'print':
             self.brew_print(parsed)
-            #self.env.exit_block()
             return None
-        elif name == 'inputi':
-            #self.env.exit_block()
-            return self.brew_input(parsed)
+        elif name == 'inputi' or name == 'inputs':
+            thing = name == 'inputi'
+            return self.brew_input(parsed, thing)
         elif self.function_check(name):
-            #this placement of new_block() causes weird things
             self.env.new_block()
             func = self.overload_check(name, len(args))
-            #should add the arguments to the master list of vars here
             for i in range(len(args)):
                 self.set_var(func.get('args')[i].get('name'), parsed[i], True)
             val = self.execute_function(func)
@@ -140,7 +136,6 @@ class Interpreter(InterpreterBase):
                 ErrorType.NAME_ERROR,
                 f"Function {name} has not been defined",
             )
-        #self.env.exit_block()
 
     # Execute a function node
     def execute_function(self, func):
@@ -158,8 +153,7 @@ class Interpreter(InterpreterBase):
         
     # The subtraction operator
     def subtract(self, op1, op2):
-        self.arith_check(op1, op2)
-        if type(op1) == type(op2):
+        if self.arith_check(op1, op2):
             return op1 - op2
         else:
             super().error(
@@ -169,7 +163,6 @@ class Interpreter(InterpreterBase):
     
     # The addition operator
     def add(self, op1, op2):
-        self.arith_check(op1, op2)
         if type(op1) == type(op2):
             return op1 + op2
         else:
@@ -180,8 +173,7 @@ class Interpreter(InterpreterBase):
 
     # The multiplication operator
     def mult(self, op1, op2):
-        self.arith_check(op1, op2)
-        if type(op1) == type(op2):
+        if self.arith_check(op1, op2):
             return op1 * op2
         else:
             super().error(
@@ -191,8 +183,7 @@ class Interpreter(InterpreterBase):
 
     # The division operator
     def div(self, op1, op2):
-        self.arith_check(op1, op2)
-        if type(op1) == type(op2):
+        if self.arith_check(op1, op2):
             return op1 // op2
         else:
             super().error(
@@ -219,7 +210,7 @@ class Interpreter(InterpreterBase):
 
     #The boolean negation
     def bool_neg(self, op1):
-        if type(op1) == bool:
+        if type(op1) == bool or type(op1) == None:
             return not op1
         else:
             super().error(
@@ -310,13 +301,17 @@ class Interpreter(InterpreterBase):
         if expr.elem_type == 'var':
             return self.get_var(expr.get('name'))
         # handling constants
-        if expr.elem_type in self.val_types:
+        if expr.elem_type in self.val_types and expr.elem_type != 'nil':
             return expr.get('val')
+        if expr.elem_type == 'nil':
+            return None
         # taking care of the binary operations
         if expr.elem_type in self.bin_ops:
             op1, op2 = None, None
-            if expr.dict['op1'].elem_type == 'int' or expr.dict['op1'].elem_type == 'string':
+            if expr.dict['op1'].elem_type in self.val_types and expr.dict['op1'].elem_type != 'nil':
                 op1 = expr.dict['op1'].dict['val']
+            elif expr.dict['op1'].elem_type == 'nil':
+                op1 = None
             elif expr.dict['op1'].elem_type == 'var':
                 op1 = self.get_var(expr.dict['op1'].dict['name'])
             elif expr.get('op1').elem_type == 'fcall':
@@ -324,8 +319,10 @@ class Interpreter(InterpreterBase):
             else:
                 op1 = self.execute_expression(expr.dict['op1'])
             
-            if expr.dict['op2'].elem_type == 'int' or expr.dict['op2'].elem_type == 'string':
+            if expr.dict['op2'].elem_type in self.val_types and expr.dict['op2'].elem_type != 'nil':
                 op2 = expr.dict['op2'].dict['val']
+            elif expr.dict['op2'].elem_type == 'nil':
+                op2 = None
             elif expr.dict['op2'].elem_type == 'var':
                 op2 = self.get_var(expr.dict['op2'].dict['name'])
             elif expr.get('op2').elem_type == 'fcall':
@@ -344,10 +341,12 @@ class Interpreter(InterpreterBase):
                         "Incompatible types for arithmetic addition",
                     )
             elif e_type == '!=':
-                #weirdness here
+                if type(op1) != type(op2):
+                    return True
                 return op1 != op2
             elif e_type == '==':
-                #weirdness here
+                if type(op1) != type(op2):
+                    return False
                 return op1 == op2
             elif e_type == '-':
                 operator = self.subtract
@@ -372,8 +371,10 @@ class Interpreter(InterpreterBase):
         #taking care of the unary operations
         elif expr.elem_type in self.un_ops:
             op1 = None
-            if expr.dict['op1'].elem_type == 'int' or expr.dict['op1'].elem_type == 'string':
+            if expr.dict['op1'].elem_type in self.val_types and expr.get('op1') != 'nil':
                 op1 = expr.dict['op1'].dict['val']
+            elif expr.dict['op1'].elem_type == 'nil':
+                op1 = None
             elif expr.dict['op1'].elem_type == 'var':
                 op1 = self.get_var(expr.dict['op1'].dict['name'])
             else:
@@ -390,10 +391,14 @@ class Interpreter(InterpreterBase):
                         "Incompatible types for arithmetic negation",
                     )
             elif e_type == '!':
-                if type(op1) == bool:
-                    operator - self.bool_neg
+                if type(op1) == bool or type(op1) == None:
+                    operator = self.bool_neg
+                else:
+                    super().error(
+                        ErrorType.TYPE_ERROR,
+                        "Incompatible types for arithmetic negation",
+                    )
             return operator(op1)
-        #Function calls
         else:
             return self.call_function(expr.get('name'), expr.get('args'))
 
@@ -406,14 +411,17 @@ class Interpreter(InterpreterBase):
         if assn.dict['expression'].elem_type == 'var':
             self.set_var(assn.dict['name'], self.get_var(assn.dict['expression'].dict['name']))
             return
-        if assn.dict['expression'].elem_type == 'int' or assn.dict['expression'].elem_type == 'string':
+        if assn.get('expression').elem_type == 'nil':
+            self.set_var(assn.get('name'), None)
+            return
+        if assn.dict['expression'].elem_type in self.val_types:
             self.set_var(assn.dict['name'], assn.dict['expression'].dict['val'])
             return
 
     def loop_conditional(self, conditional):
         output = self.execute_expression(conditional)
         if type(output) != bool:
-            super.error(
+            super().error(
                 ErrorType.TYPE_ERROR,
                 "Not boolean expression in conditional check"
             )
@@ -425,7 +433,6 @@ class Interpreter(InterpreterBase):
     def execute_statement(self, statement):
         if statement.elem_type == '=':
             return self.execute_assignment(statement)
-            #not sure if I should return anything?
 
         elif statement.elem_type == 'fcall':
             return self.call_function(statement.get('name'), statement.get('args'))
@@ -433,12 +440,7 @@ class Interpreter(InterpreterBase):
         elif statement.elem_type == 'if':
             self.env.new_block()
             output = None
-            if type(self.execute_expression(statement.get('condition'))) != bool:
-                super().error(
-                    ErrorType.TYPE_ERROR,
-                    "Incompatible type for if conditional",
-                )
-            if self.execute_expression(statement.get('condition')):
+            if self.loop_conditional(statement.get('condition')):
                 for true_statement in statement.get('statements'):
                     output = self.execute_statement(true_statement)
                     if self.env.is_ret():
@@ -455,8 +457,6 @@ class Interpreter(InterpreterBase):
         elif statement.elem_type == 'while':
             output = None
             self.env.new_block()
-            # if not explicitly a boolean, error out
-            # while self.execute_expression(statement.get('condition')):
             while self.loop_conditional(statement.get('condition')):
                 for while_statements in statement.get('statements'):
                     output = self.execute_statement(while_statements)
@@ -467,7 +467,6 @@ class Interpreter(InterpreterBase):
             return None
             
         elif statement.elem_type == 'return':
-            #self.env.exit_block()
             output = None
             if statement.get('expression') != None:
                 output = self.execute_expression(statement.get('expression'))
@@ -478,5 +477,15 @@ class Interpreter(InterpreterBase):
                 return None
         return None
 
+def main():
+    program = """
+    func main() {
+  a = 5;
+  if (a) { print("true"); print("foo"); }
+}
+"""
+    interp = Interpreter()
+    interp.run(program)
 
-
+if __name__ == '__main__':
+    main()
