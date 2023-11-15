@@ -1,3 +1,8 @@
+#This is here just so I can force object pointers
+class Box:
+    def __init__(self, val):
+        self.val = val
+
 # The EnvironmentManager class keeps a mapping between each variable (aka symbol)
 # in a brewin program and the value of that variable - the value that's passed in can be
 # anything you like. In our implementation we pass in a Value object which holds a type
@@ -29,17 +34,24 @@ class EnvironmentManager:
     # Gets the data associated a variable name
     def get(self, symbol):
         for i in range(self.curr_scope, -1, -1):
-            if symbol in self.environment[i] and self.environment[i][symbol][1] <= self.curr_scope:
-                return self.environment[i][symbol][0], True
+            if symbol in self.environment[i]:
+                return self.environment[i][symbol].val, True
         return None, False
 
     # Sets the data associated with a variable name
-    def set(self, symbol, value, is_param):
-        if is_param:
-            self.environment[self.curr_scope][symbol] = (value, self.curr_scope)
+    def set(self, symbol, value, is_param, is_ref, ref_name):
+        if is_param and not is_ref:
+            self.environment[self.curr_scope][symbol] = Box(value)
+            return
+        elif is_param and is_ref and ref_name != None:
+            for i in range(self.curr_scope, -1, -1):
+                if ref_name in self.environment[i]:
+                    # self.environment[i][symbol] = (Box(value), i)
+                    self.environment[self.curr_scope][symbol] = self.environment[i][ref_name]
+                    return
         for i in range(self.curr_scope, -1, -1):
-            if symbol in self.environment[i] and self.environment[i][symbol][1] <= self.curr_scope:
-                self.environment[i][symbol] = (value, i)
+            if symbol in self.environment[i]:
+                self.environment[i][symbol].val = value
                 return
-        self.environment[self.curr_scope][symbol] = (value, self.curr_scope)
+        self.environment[self.curr_scope][symbol] = Box(value)
 
