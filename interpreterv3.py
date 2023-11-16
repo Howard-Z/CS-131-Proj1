@@ -295,6 +295,8 @@ class Interpreter(InterpreterBase):
     # The subtraction operator
     def subtract(self, op1, op2):
         if self.bool_int_comp_check(op1, op2):
+            op1 = self.coerce_to_int(op1)
+            op2 = self.coerce_to_int(op2)
             return op1 - op2
         else:
             super().error(
@@ -317,6 +319,8 @@ class Interpreter(InterpreterBase):
     # The multiplication operator
     def mult(self, op1, op2):
         if self.bool_int_comp_check(op1, op2):
+            op1 = self.coerce_to_int(op1)
+            op2 = self.coerce_to_int(op2)
             return op1 * op2
         else:
             super().error(
@@ -327,6 +331,8 @@ class Interpreter(InterpreterBase):
     # The division operator
     def div(self, op1, op2):
         if self.bool_int_comp_check(op1, op2):
+            op1 = self.coerce_to_int(op1)
+            op2 = self.coerce_to_int(op2)
             return op1 // op2
         else:
             super().error(
@@ -378,6 +384,8 @@ class Interpreter(InterpreterBase):
     # or operator
     def lor(self, op1, op2):
         if self.bool_int_comp_check(op1, op2):
+            op1 = self.coerce_to_bool(op1)
+            op2 = self.coerce_to_bool(op2)
             return op1 or op2
         else:
             super().error(
@@ -388,6 +396,8 @@ class Interpreter(InterpreterBase):
     # and operator
     def land(self, op1, op2):
         if self.bool_int_comp_check(op1, op2):
+            op1 = self.coerce_to_bool(op1)
+            op2 = self.coerce_to_bool(op2)
             return op1 and op2
         else:
             super().error(
@@ -398,6 +408,8 @@ class Interpreter(InterpreterBase):
     # The < operator
     def less_than(self, op1, op2):
         if self.bool_int_comp_check(op1, op2):
+            op1 = self.coerce_to_int(op1)
+            op2 = self.coerce_to_int(op2)
             return op1 < op2
         else:
             super().error(
@@ -408,6 +420,8 @@ class Interpreter(InterpreterBase):
     # The > operator
     def greater_than(self, op1, op2):
         if self.bool_int_comp_check(op1, op2):
+            op1 = self.coerce_to_int(op1)
+            op2 = self.coerce_to_int(op2)
             return op1 > op2
         else:
             super().error(
@@ -418,6 +432,8 @@ class Interpreter(InterpreterBase):
     # The <= operator
     def leq(self, op1, op2):
         if self.bool_int_comp_check(op1, op2):
+            op1 = self.coerce_to_int(op1)
+            op2 = self.coerce_to_int(op2)
             return op1 <= op2
         else:
             super().error(
@@ -428,6 +444,8 @@ class Interpreter(InterpreterBase):
     # The >= operator
     def geq(self, op1, op2):
         if self.bool_int_comp_check(op1, op2):
+            op1 = self.coerce_to_int(op1)
+            op2 = self.coerce_to_int(op2)
             return op1 >= op2
         else:
             super().error(
@@ -436,14 +454,24 @@ class Interpreter(InterpreterBase):
             )
     
     #NOTE: These 2 functions do not have functionality for function and lambda comparisons
-    def neq(self, op1, op2):        
-        return op1 != op2
+    def neq(self, op1, op2):
+        return not self.equal(op1, op2)
 
     def equal(self, op1, op2):
-        if type(op1) == int:
-            op1 = self.coerce_to_bool(op1)
-        if type(op2) == int:
-            op2 = self.coerce_to_bool(op1)
+        if type(op1) == int and type(op2) == int:
+            return op1 == op2
+        if type(op1) == bool and type(op2) == bool:
+            return op1 == op2
+        if type(op1) == bool or type(op1) == int:
+            if type(op2) == bool or type(op2) == int:
+                return self.coerce_to_bool(op1) == self.coerce_to_bool(op2)
+        if self.string_check(op1, op2):
+            return op1 == op2
+        if op1 == None and op2 == None:
+            return True
+        if type(op1) == element.Element and type(op2) == element.Element:
+            if op1.elem_type == 'func' and op2.elem_type == 'func':
+                return op1 == op2
         return op1 == op2
 
     # Corersion function to bool
@@ -652,7 +680,8 @@ class Interpreter(InterpreterBase):
             if statement.get('expression') != None:
                 output = self.execute_expression(statement.get('expression'))
                 self.env.set_ret(True)
-                return output
+                # all returns are deep copies
+                return copy.deepcopy(output)
             else:
                 self.env.set_ret(True)
                 return None
