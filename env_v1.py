@@ -37,6 +37,20 @@ class EnvironmentManager:
             if symbol in self.environment[i]:
                 return self.environment[i][symbol].val, True
         return None, False
+    
+    # Gets the data associated a variable name
+    def get_obj(self, symbol):
+        for i in range(self.curr_scope, -1, -1):
+            if symbol in self.environment[i]:
+                return self.environment[i][symbol], True
+        return None, False
+
+    # deletes the object specified by the symbol
+    def del_obj(self, symbol):
+        for i in range(self.curr_scope, -1, -1):
+            if symbol in self.environment[i]:
+                del self.environment[i][symbol]
+        return True
 
     # Sets the data associated with a variable name
     def set(self, symbol, value, is_param, is_ref, ref_name):

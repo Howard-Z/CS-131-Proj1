@@ -56,6 +56,18 @@ class Interpreter(InterpreterBase):
                 )
         else:
             return val
+        
+    # Get the object bound to the name if it exists:
+    # can you capture functions? no
+    def get_obj(self, name):
+        val, status = self.env.get_obj(name)
+        if status == False:
+            super().error(
+                ErrorType.NAME_ERROR,
+                f"Variable {name} has not been defined",
+            )
+        else:
+            return val
     
     # Set a variable
     def set_var(self, name, val, is_param = False, is_ref = False, ref_name = None):
@@ -145,6 +157,7 @@ class Interpreter(InterpreterBase):
         return func
 
     #overload check
+    # TODO: ammend for lambdas in the last if check, or handle lambdas separate from reg functions
     def overload_check(self, name, num_args):
         ast_temp = self.ast.get('functions')
         for ast_func in ast_temp:
@@ -152,12 +165,13 @@ class Interpreter(InterpreterBase):
                 return True
         func = self.get_var(name)
         if type(func) == element.Element:
-            if func.elem_type == 'func' and len(func.get('args')) == num_args:
+            if (func.elem_type == 'func' or func.elem_type == 'lambda') and len(func.get('args')) == num_args:
                 return True
         return False
 
     
     #function check
+    # TODO: amend for lambdas in last if statement or handle lambdas separate from reg functions
     def function_check(self, name):
         ast_func = self.ast.get('functions')
         for func in ast_func:
@@ -165,7 +179,19 @@ class Interpreter(InterpreterBase):
                 return True
         func = self.get_var(name)
         if type(func) == element.Element:
-            if func.elem_type == 'func':
+            if func.elem_type == 'func' or func.elem_type == 'lambda':
+                return True
+        else:
+            super().error(
+                ErrorType.TYPE_ERROR,
+                f"Function {name} is not a defined function",
+            )
+
+    #lambda check
+    def lambda_check(self, name):
+        func = self.get_var(name)
+        if type(func) == element.Element:
+            if func.elem_type == 'lambda':
                 return True
         else:
             super().error(
@@ -178,6 +204,14 @@ class Interpreter(InterpreterBase):
         if expr.elem_type == 'var':
             return expr.get('name')
         return None
+    
+    # flatten env: for flattening lambda env
+    def flatten_env(self, env):
+        output = {}
+        for dic in env.environment:
+            for key in dic:
+                output[key] = dic[key]
+        return output
 
     # Function for handling brewin function calls
     def call_function(self, name, args):
@@ -189,25 +223,53 @@ class Interpreter(InterpreterBase):
             parsed = self.parse_args(args)
             thing = name == 'inputi'
             return self.brew_input(parsed, thing)
+        #regular functions handled here
         elif self.function_check(name):
-            self.env.new_block()
-            func = None
-            if self.overload_check(name, len(args)):
-                func = self.get_func(name)
-            else:
-                super().error(
-                ErrorType.NAME_ERROR,
-                f"Function {name} has not been defined",
-            )
-            for i in range(len(args)):
-                if func.get('args')[i].elem_type == 'arg':
-                    self.set_var(func.get('args')[i].get('name'), self.parse_single(args[i]), True, False)
+            # consider placing a check here for lambdas vs regular functions
+            if not self.lambda_check(name):
+                self.env.new_block()
+                func = None
+                if self.overload_check(name, len(args)):
+                    func = self.get_func(name)
                 else:
-                    self.set_var(func.get('args')[i].get('name'), self.parse_single(args[i]), True, True, self.var_or_none(args[i]))
-            val = self.execute_function(func)
-            self.env.set_ret(False)
-            self.env.exit_block()
-            return val
+                    super().error(
+                    ErrorType.NAME_ERROR,
+                    f"Function {name} has not been defined",
+                )
+                for i in range(len(args)):
+                    if func.get('args')[i].elem_type == 'arg':
+                        self.set_var(func.get('args')[i].get('name'), copy.deepcopy(self.parse_single(args[i])), True, False)
+                    #else it must be a refarg
+                    else:
+                        self.set_var(func.get('args')[i].get('name'), self.parse_single(args[i]), True, True, self.var_or_none(args[i]))
+                val = self.execute_function(func)
+                self.env.set_ret(False)
+                self.env.exit_block()
+                return val
+            else:
+                #we running lambdas here
+                func = self.get_var(name)
+                self.env.environment.append(func.get('cap_env'))
+                self.env.curr_scope += 1
+                if not self.overload_check(name, len(args)):
+                    super().error(
+                    ErrorType.TYPE_ERROR,
+                    f"Function {name} has not been defined",
+                )
+                # not doing arg length check, should prob do it
+                # should I call new block here to add parameters?
+                for i in range(len(args)):
+                    if func.get('args')[i].elem_type == 'arg':
+                        #get the captured var out of env
+                        self.set_var(func.get('args')[i].get('name'), self.parse_single(args[i]), True, False)
+                    #else it must be a refarg
+                    else:
+                        self.set_var(func.get('args')[i].get('name'), self.parse_single(args[i]), True, True, self.var_or_none(args[i]))
+                val = self.execute_function(func, True)
+                self.env.set_ret(False)
+                self.env.exit_block()
+                return val
+
             
         else:
             super().error(
@@ -216,7 +278,7 @@ class Interpreter(InterpreterBase):
             )
 
     # Execute a function node
-    def execute_function(self, func):
+    def execute_function(self, func, lam = False):
         output = None
         if self.debug:
             print(self.env.is_ret())
@@ -229,9 +291,10 @@ class Interpreter(InterpreterBase):
                 self.env.set_ret(False)
                 return output
         
+
     # The subtraction operator
     def subtract(self, op1, op2):
-        if self.arith_check(op1, op2):
+        if self.bool_int_comp_check(op1, op2):
             return op1 - op2
         else:
             super().error(
@@ -241,7 +304,9 @@ class Interpreter(InterpreterBase):
     
     # The addition operator
     def add(self, op1, op2):
-        if type(op1) == type(op2):
+        if type(op1) == type(op2) and type(op1) == str:
+            return op1 + op2
+        if self.bool_int_comp_check(op1, op2):
             return op1 + op2
         else:
             super().error(
@@ -251,7 +316,7 @@ class Interpreter(InterpreterBase):
 
     # The multiplication operator
     def mult(self, op1, op2):
-        if self.arith_check(op1, op2):
+        if self.bool_int_comp_check(op1, op2):
             return op1 * op2
         else:
             super().error(
@@ -261,7 +326,7 @@ class Interpreter(InterpreterBase):
 
     # The division operator
     def div(self, op1, op2):
-        if self.arith_check(op1, op2):
+        if self.bool_int_comp_check(op1, op2):
             return op1 // op2
         else:
             super().error(
@@ -288,7 +353,7 @@ class Interpreter(InterpreterBase):
 
     #The boolean negation
     def bool_neg(self, op1):
-        if type(op1) == bool or type(op1) == None:
+        if type(op1) == bool or type(op1) == int:
             return not op1
         else:
             super().error(
@@ -312,7 +377,7 @@ class Interpreter(InterpreterBase):
         
     # or operator
     def lor(self, op1, op2):
-        if self.bool_checker(op1, op2):
+        if self.bool_int_comp_check(op1, op2):
             return op1 or op2
         else:
             super().error(
@@ -322,7 +387,7 @@ class Interpreter(InterpreterBase):
 
     # and operator
     def land(self, op1, op2):
-        if self.bool_checker(op1, op2):
+        if self.bool_int_comp_check(op1, op2):
             return op1 and op2
         else:
             super().error(
@@ -332,7 +397,7 @@ class Interpreter(InterpreterBase):
 
     # The < operator
     def less_than(self, op1, op2):
-        if self.arith_check(op1, op2):
+        if self.bool_int_comp_check(op1, op2):
             return op1 < op2
         else:
             super().error(
@@ -342,7 +407,7 @@ class Interpreter(InterpreterBase):
     
     # The > operator
     def greater_than(self, op1, op2):
-        if self.arith_check(op1, op2):
+        if self.bool_int_comp_check(op1, op2):
             return op1 > op2
         else:
             super().error(
@@ -352,7 +417,7 @@ class Interpreter(InterpreterBase):
 
     # The <= operator
     def leq(self, op1, op2):
-        if self.arith_check(op1, op2):
+        if self.bool_int_comp_check(op1, op2):
             return op1 <= op2
         else:
             super().error(
@@ -362,14 +427,24 @@ class Interpreter(InterpreterBase):
 
     # The >= operator
     def geq(self, op1, op2):
-        if self.arith_check(op1, op2):
+        if self.bool_int_comp_check(op1, op2):
             return op1 >= op2
         else:
             super().error(
                 ErrorType.TYPE_ERROR,
                 "Incompatible types for arithmetic comparison",
             )
+    
+    #NOTE: These 2 functions do not have functionality for function and lambda comparisons
+    def neq(self, op1, op2):        
+        return op1 != op2
 
+    def equal(self, op1, op2):
+        if type(op1) == int:
+            op1 = self.coerce_to_bool(op1)
+        if type(op2) == int:
+            op2 = self.coerce_to_bool(op1)
+        return op1 == op2
 
     # Corersion function to bool
     def coerce_to_bool(self, val):
@@ -433,33 +508,12 @@ class Interpreter(InterpreterBase):
             
             operator = None
             e_type = expr.elem_type
-            if e_type in self.arith_ops:
-                op1 = self.coerce_to_int(op1)
-                op2 = self.coerce_to_int(op2)
-            if e_type in self.bool_expr:
-                op1 = self.coerce_to_bool(op1)
-                op2 = self.coerce_to_bool(op2)
             if e_type == '+':
-                if self.arith_check(op1, op2) or self.string_check(op1, op2):
-                    operator = self.add
-                else:
-                    super().error(
-                        ErrorType.TYPE_ERROR,
-                        "Incompatible types for arithmetic addition",
-                    )
+                operator = self.add
             elif e_type == '!=':
-                if type(op1) != type(op2):
-                    if self.bool_int_comp_check(op1, op2):
-                        return self.coerce_to_bool(op1) != self.coerce_to_bool(op2)
-                    else:
-                        return True
-                return op1 != op2
+                operator = self.neq
             elif e_type == '==':
-                if type(op1) != type(op2):
-                    if self.bool_int_comp_check(op1, op2):
-                        return self.coerce_to_bool(op1) == self.coerce_to_bool(op2)
-                    return False
-                return op1 == op2
+                operator = self.equal
             elif e_type == '-':
                 operator = self.subtract
             elif e_type == '*':
@@ -482,6 +536,7 @@ class Interpreter(InterpreterBase):
         
         #taking care of the unary operations
         elif expr.elem_type in self.un_ops:
+            # Uhh this is default nil???
             op1 = None
             if expr.dict['op1'].elem_type in self.val_types and expr.get('op1') != 'nil':
                 op1 = expr.dict['op1'].dict['val']
@@ -503,6 +558,7 @@ class Interpreter(InterpreterBase):
                         "Incompatible types for arithmetic negation",
                     )
             elif e_type == '!':
+                # Ugly
                 if type(op1) == int:
                     op1 = self.coerce_to_bool(op1)
                 if type(op1) == bool or type(op1) == None:
@@ -519,21 +575,29 @@ class Interpreter(InterpreterBase):
             
     # Execute an assignemnt operator
     def execute_assignment(self, assn):
-        if assn.dict['expression'].elem_type in self.bin_ops or assn.dict['expression'].elem_type in self.un_ops or assn.dict['expression'].elem_type == 'fcall':
-            self.set_var(assn.get('name'), self.execute_expression(assn.dict['expression']))
+        e_type = assn.dict['expression'].elem_type
+        if e_type in self.bin_ops or e_type in self.un_ops or e_type == 'fcall':
+            # need deep copy here for lambdas? where else would I need them?
+            self.set_var(assn.get('name'), copy.deepcopy(self.execute_expression(assn.dict['expression'])))
             return 
-        if assn.dict['expression'].elem_type == 'var':
+        if e_type == 'var':
             self.set_var(assn.dict['name'], self.get_var(assn.dict['expression'].dict['name']))
             return
         if assn.get('expression').elem_type == 'nil':
             self.set_var(assn.get('name'), None)
             return
-        if assn.dict['expression'].elem_type in self.val_types:
+        if e_type in self.val_types:
             self.set_var(assn.dict['name'], assn.dict['expression'].dict['val'])
             return
-        if assn.dict['expression'].elem_type == 'lambda':
-            # TODO
-            pass
+        if e_type == 'lambda':
+            name = assn.dict['name']
+            # take a snapshot of the current env
+            env_copy = copy.deepcopy(self.env)
+            # delete all symbols with the same name as parameters
+            for arg in assn.get('expression').get('args'):
+                env_copy.del_obj(arg.get('name'))
+            assn.get('expression').dict['cap_env'] = self.flatten_env(env_copy)
+            self.set_var(name, assn.get('expression'))
 
     def loop_conditional(self, conditional):
         output = self.execute_expression(conditional)
@@ -596,23 +660,28 @@ class Interpreter(InterpreterBase):
 
 def main():
     program = """
-func foo(ref f) {
- return f;
+func foo(f1, ref f2) {
+  f1(); /* prints 1 */
+  f2(); /* prints 1 */
 }
-
 
 func main() {
-  b = 0;
-  f = lambda () { b = b + 1; print(b); };
-  f();
-  f();
-  g = foo(f);
-  g();
-  g();
-  f();
-  print(b);
+  x = 0;
+  lam1 = lambda() { x = x + 1; print(x); };
+  lam2 = lambda() { x = x + 1; print(x); };
+  foo(lam1, lam2);
+  lam1(); /* prints 1 */
+  lam2(); /* prints 2 */
 }
 
+/*
+*OUT*
+1
+1
+1
+2
+*OUT*
+*/
 """
     interp = Interpreter()
     interp.run(program)
