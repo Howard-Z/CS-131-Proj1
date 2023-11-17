@@ -148,10 +148,10 @@ class Interpreter(InterpreterBase):
         )
 
     # get function
-    def get_func(self, name):
+    def get_func(self, name, len_args):
         ast_temp = self.ast.get('functions')
         for ast_func in ast_temp:
-            if ast_func.get('name') == name:
+            if ast_func.get('name') == name and len_args == len(ast_func.get('args')):
                 return ast_func
         func = self.get_var(name)
         return func
@@ -166,6 +166,20 @@ class Interpreter(InterpreterBase):
         func = self.get_var(name)
         if type(func) == element.Element:
             if (func.elem_type == 'func' or func.elem_type == 'lambda') and len(func.get('args')) == num_args:
+                return True
+        return False
+    
+    def lambda_overload_check(self, name, num_args):
+        func = self.get_var(name)
+        if type(func) == element.Element:
+            if (func.elem_type == 'func' or func.elem_type == 'lambda') and len(func.get('args')) == num_args:
+                return True
+        return False
+    
+    def ast_overload_check(self, name, num_args):
+        ast_temp = self.ast.get('functions')
+        for ast_func in ast_temp:
+            if ast_func.get('name') == name and len(ast_func.get('args')) == num_args:
                 return True
         return False
 
@@ -186,6 +200,14 @@ class Interpreter(InterpreterBase):
                 ErrorType.TYPE_ERROR,
                 f"Function {name} is not a defined function",
             )
+
+    # check if a function is a member of the ast
+    def ast_func_check(self, name):
+        ast_func = self.ast.get('functions')
+        for func in ast_func:
+            if func.get('name') == name:
+                return True
+        return False
 
     #lambda check
     def lambda_check(self, name):
@@ -226,11 +248,12 @@ class Interpreter(InterpreterBase):
         #regular functions handled here
         elif self.function_check(name):
             # consider placing a check here for lambdas vs regular functions
-            if not self.lambda_check(name):
+            if self.ast_func_check(name):
                 self.env.new_block()
                 func = None
-                if self.overload_check(name, len(args)):
-                    func = self.get_func(name)
+                if self.ast_overload_check(name, len(args)):
+                    # need to get func with num args
+                    func = self.get_func(name, len(args))
                 else:
                     super().error(
                     ErrorType.NAME_ERROR,
@@ -247,24 +270,42 @@ class Interpreter(InterpreterBase):
                 self.env.exit_block()
                 return val
             else:
-                #we running lambdas here
+                #we running lambdas or user assigned funcs here
                 func = self.get_var(name)
-                self.env.environment.append(func.get('cap_env'))
-                self.env.curr_scope += 1
-                if not self.overload_check(name, len(args)):
+                # conveniently does overload checks for lambda and user funcs as well
+                if not self.lambda_overload_check(name, len(args)):
                     super().error(
                     ErrorType.TYPE_ERROR,
                     f"Function {name} has not been defined",
                 )
-                # not doing arg length check, should prob do it
-                # should I call new block here to add parameters?
-                for i in range(len(args)):
-                    if func.get('args')[i].elem_type == 'arg':
-                        #get the captured var out of env
-                        self.set_var(func.get('args')[i].get('name'), self.parse_single(args[i]), True, False)
-                    #else it must be a refarg
-                    else:
-                        self.set_var(func.get('args')[i].get('name'), self.parse_single(args[i]), True, True, self.var_or_none(args[i]))
+                #if lambda
+                if func.elem_type == 'lambda':
+                    #TODO: process lambda arguments differently than user func args
+                    # lambda ref args must get the reference from the main env
+                    # BEFORE adding the captured variables
+                    # Actually, get the reference and then just modify the captured set
+                    # i.e. cap_env['key'] = pointer from mainenv
+                    # this will work since the pointer from mainevn will get overwritten at each call
+                    # big bad and ugly
+                    for i in range(len(args)):
+                        arg_name = func.get('args')[i].get('name')
+                        if func.get('args')[i].elem_type == 'arg':
+                            func.get('cap_env')[arg_name] = Box(self.parse_single(args[i]))
+                        #else it must be a refarg
+                        else:
+                            func.get('cap_env')[arg_name], status = self.env.get_obj(self.var_or_none(args[i]))
+                    self.env.environment.append(func.get('cap_env'))
+                    self.env.curr_scope += 1
+                #else user defined function
+                else:
+                    self.env.new_block()
+                    for i in range(len(args)):
+                        if func.get('args')[i].elem_type == 'arg':
+                            #get the captured var out of env
+                            self.set_var(func.get('args')[i].get('name'), self.parse_single(args[i]), True, False)
+                        #else it must be a refarg
+                        else:
+                            self.set_var(func.get('args')[i].get('name'), self.parse_single(args[i]), True, True, self.var_or_none(args[i]))
                 val = self.execute_function(func, True)
                 self.env.set_ret(False)
                 self.env.exit_block()
@@ -507,6 +548,13 @@ class Interpreter(InterpreterBase):
         # handling constants
         if expr.elem_type in self.val_types and expr.elem_type != 'nil':
             return expr.get('val')
+        if expr.elem_type == 'lambda':
+            # Do the same as defining lambdas
+            env_copy = copy.deepcopy(self.env)
+            for arg in expr.get('args'):
+                env_copy.del_obj(arg.get('name'))
+            expr.dict['cap_env'] = self.flatten_env(env_copy)
+            return expr
         if expr.elem_type == 'nil':
             return None
         # taking care of the binary operations
@@ -689,28 +737,19 @@ class Interpreter(InterpreterBase):
 
 def main():
     program = """
-func foo(f1, ref f2) {
-  f1(); /* prints 1 */
-  f2(); /* prints 1 */
+func foo(a) {
+    return lambda(b) { return lambda (c) {return a * b * c;};};
 }
 
 func main() {
-  x = 0;
-  lam1 = lambda() { x = x + 1; print(x); };
-  lam2 = lambda() { x = x + 1; print(x); };
-  foo(lam1, lam2);
-  lam1(); /* prints 1 */
-  lam2(); /* prints 2 */
+    x = 3;
+    y = 6;
+    z = 10;
+    p = foo(x);
+    q = p(y);
+    r = q(z);
+    print(r);  
 }
-
-/*
-*OUT*
-1
-1
-1
-2
-*OUT*
-*/
 """
     interp = Interpreter()
     interp.run(program)
