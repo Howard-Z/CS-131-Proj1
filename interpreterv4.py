@@ -304,9 +304,7 @@ class Interpreter(InterpreterBase):
         if name in obj:
             return obj[name], True
         if 'proto' in obj:
-            #Add recursion
-            if name in obj['proto']:
-                return obj['proto'][name], True
+            return self.method_search(obj['proto'], name)
         return None, False
     
 
@@ -342,7 +340,8 @@ class Interpreter(InterpreterBase):
                 else:
                     func.get('cap_env')[arg_name], status = self.env.get_obj(self.var_or_none(args[i]))
             self.env.environment.append(func.get('cap_env'))
-            self.set_var("this", obj, True, False)
+            #self.set_var("this", obj, True, False)
+            self.env.environment[self.env.curr_scope]['this'] = self.env.get_obj(objref)[0]
             self.env.curr_scope += 1
             val = self.execute_function(func)
             self.env.set_ret(False)
@@ -363,7 +362,8 @@ class Interpreter(InterpreterBase):
                 else:
                     self.set_var(func.get('args')[i].get('name'), self.parse_single(args[i]), True, True, self.var_or_none(args[i]))
             #NOTE: should I use is_ref flag here?: prob not
-            self.set_var("this", obj, True, False)
+            #self.set_var("this", obj, True, False)
+            self.env.environment[self.env.curr_scope]['this'] = self.env.get_obj(objref)[0]
             val = self.execute_function(func)
             self.env.set_ret(False)
             self.env.exit_block()
@@ -653,6 +653,8 @@ class Interpreter(InterpreterBase):
         if type(op1) == element.Element and type(op2) == element.Element:
             if op1.elem_type == 'func' and op2.elem_type == 'func':
                 return op1 == op2
+        if type(op1) == dict and type(op2) == dict:
+            return op1 is op2
         return op1 == op2
 
     # Corersion function to bool
@@ -696,6 +698,7 @@ class Interpreter(InterpreterBase):
             expr.dict['cap_env'] = self.flatten_env(self.env)
             return expr
         #TODO handle objects? are they handled by the var if statement above?
+        #TODO handle MCALLSF
         if expr.elem_type == 'nil':
             return None
         # taking care of the binary operations
@@ -890,9 +893,15 @@ class Interpreter(InterpreterBase):
 
 def main():
     program = """
+func foo()
+{
+  this = 7;
+}
 func main() {
-  f = 5;
-  f.foo();
+	a = @;
+	a.bar = foo;
+	a.bar();
+	print(a);
 }
 """
     interp = Interpreter()
