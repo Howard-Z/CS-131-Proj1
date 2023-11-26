@@ -15,6 +15,7 @@ class Interpreter(InterpreterBase):
         self.arith_ops = {'+', '-', '*', '/'}
         self.val_types = {'int', 'string', 'bool', 'nil'}
         self.bool_expr = {'||', '&&'}
+        self.primitives = {int, bool, str}
 
     # Run a program
     def run(self, program):
@@ -40,7 +41,10 @@ class Interpreter(InterpreterBase):
         
     # Get the value of a variable if it exists
     def get_var(self, name):
-        val, status = self.env.get(name)
+        if self.is_name_obj(name):
+            val, status = self.obj_get_var(name)
+        else:
+            val, status = self.env.get(name)
         if status == False:
             # If you didn't pull a value out of the env
             # Then you must be looking for a function from the execute assignment function
@@ -57,9 +61,33 @@ class Interpreter(InterpreterBase):
         else:
             return val
         
+    def obj_get_var(self, name):
+        split_name = name.split('.')
+        obj = self.get_var(split_name[0])
+        if type(obj) != dict:
+            super().error(
+                ErrorType.TYPE_ERROR,
+                f"object {name} is not an object",
+            )
+        val, status = self.method_search(obj, name)
+        if status:
+            return val
+        else:
+            super().error(
+                ErrorType.NAME_ERROR,
+                f"object {split_name[0]} has no field {split_name[1]}",
+            )
     # Get the object bound to the name if it exists:
     # can you capture functions? no
     def get_obj(self, name):
+        if self.is_name_obj(name):
+            val, status = self.obj_get_var(name)
+            if status == False:
+                super().error(
+                    ErrorType.NAME_ERROR,
+                    f"Object {name} has not been defined"
+                )
+            return val
         val, status = self.env.get_obj(name)
         if status == False:
             super().error(
@@ -69,9 +97,33 @@ class Interpreter(InterpreterBase):
         else:
             return val
     
+    def obj_set_var(self, name, val):
+        is_obj = self.is_name_obj(name)
+        if is_obj:
+            split_name = name.split('.')
+            obj = self.get_var(split_name[0])
+            if type(obj) != dict:
+                super().error(
+                    ErrorType.TYPE_ERROR,
+                    f"Can't use dot syntax on a non obj {name}",
+                )
+            else:
+                # WARNING: this will not work with references?
+                if split_name[1] == 'proto':
+                    # need to check for primitives
+                    if type(val) in self.primitives:
+                        super().error(
+                            ErrorType.TYPE_ERROR,
+                            f"Can't assign primitive as a prototype",
+                        )
+                obj[split_name[1]] = val
+
     # Set a variable
     def set_var(self, name, val, is_param = False, is_ref = False, ref_name = None):
-        self.env.set(name, val, is_param, is_ref, ref_name)
+        if self.is_name_obj(name):
+            self.obj_set_var(name, val)
+        else:
+            self.env.set(name, val, is_param, is_ref, ref_name)
 
     # Parse a single argument
     def parse_single(self, arg):
@@ -228,12 +280,91 @@ class Interpreter(InterpreterBase):
         return None
     
     # flatten env: for flattening lambda env
-    def flatten_env(self, env):
+    def flatten_env(self, env, name_list = None):
         output = {}
         for dic in env.environment:
             for key in dic:
-                output[key] = dic[key]
+                if key not in name_list:
+                    # capturing objects by reference
+                    if type(dic[key].val) == dict:
+                        output[key] = dic[key]
+                    # capturing lambdas by reference
+                    elif type(dic[key].val) == element.Element:
+                        if dic[key].val.elem_type == 'lambda':
+                            output[key] = dic[key]
+                        else:
+                            output[key] = copy.deepcopy(dic[key])
+                    else:
+                        output[key] = copy.deepcopy(dic[key])
         return output
+    
+    #searches the object and the prototye for a function/var
+    def method_search(self, obj, name):
+        if name in obj:
+            return obj[name], True
+        if 'proto' in obj:
+            if name in obj['proto']:
+                return obj['proto'][name], True
+        return None, False
+    # handle method calls
+    def call_method(self, objref, name, args):
+        obj = self.get_var(objref)
+        #TODO overload checks
+        val, status = self.method_search(obj, name)
+        if not status:
+            super().error(
+                ErrorType.NAME_ERROR,
+                f"obj method {objref}.{name} is not defined",
+                )
+        else:
+            func = val
+            if type(func) != element.Element:
+                super().error(
+                    ErrorType.TYPE_ERROR,
+                    f"obj method {objref}.{name} is not a method",
+                )
+        if func.elem_type == 'lambda':
+            for i in range(len(args)):
+                arg_name = func.get('args')[i].get('name')
+                # if it's a regular arg
+                if func.get('args')[i].elem_type == 'arg':
+                    func.get('cap_env')[arg_name] = Box(self.parse_single(args[i]))
+                # must be a refarg
+                else:
+                    func.get('cap_env')[arg_name], status = self.env.get_obj(self.var_or_none(args[i]))
+            self.env.environment.append(func.get('cap_env'))
+            self.set_var("this", obj, True, False)
+            self.env.curr_scope += 1
+            val = self.execute_function(func)
+            self.env.set_ret(False)
+            self.env.exit_block()
+            return val
+        elif func.elem_type == 'func':
+            if len(args) != len(func.get('args')):
+                super().error(
+                    ErrorType.NAME_ERROR,
+                    f"Function {func.get('name')} called incorrectly",
+                )
+            self.env.new_block()
+            for i in range(len(args)):
+                # parsing non reference args here
+                if func.get('args')[i].elem_type == 'arg':
+                    self.set_var(func.get('args')[i].get('name'), copy.deepcopy(self.parse_single(args[i])), True, False)
+                #must be a refarg
+                else:
+                    self.set_var(func.get('args')[i].get('name'), self.parse_single(args[i]), True, True, self.var_or_none(args[i]))
+            #NOTE: should I use is_ref flag here?: prob not
+            self.set_var("this", obj, True, False)
+            val = self.execute_function(func)
+            self.env.set_ret(False)
+            self.env.exit_block()
+            return val
+        else:
+            super().error(
+                ErrorType.TYPE_ERROR,
+                f"{objref}.{name} is not a valid function",
+            )
+        pass
 
     # Function for handling brewin function calls
     def call_function(self, name, args):
@@ -550,11 +681,12 @@ class Interpreter(InterpreterBase):
             return expr.get('val')
         if expr.elem_type == 'lambda':
             # Do the same as defining lambdas
-            env_copy = copy.deepcopy(self.env)
+            name_lst = []
             for arg in expr.get('args'):
-                env_copy.del_obj(arg.get('name'))
-            expr.dict['cap_env'] = self.flatten_env(env_copy)
+                name_lst.append(arg.get('name'))
+            expr.dict['cap_env'] = self.flatten_env(self.env)
             return expr
+        #TODO handle objects? are they handled by the var if statement above?
         if expr.elem_type == 'nil':
             return None
         # taking care of the binary operations
@@ -648,6 +780,11 @@ class Interpreter(InterpreterBase):
         else:
             return self.call_function(expr.get('name'), expr.get('args'))
 
+    def is_name_obj(self, name):
+        if '.' in name:
+            return True
+        else:
+            return False
             
     # Execute an assignemnt operator
     def execute_assignment(self, assn):
@@ -668,12 +805,16 @@ class Interpreter(InterpreterBase):
         if e_type == 'lambda':
             name = assn.dict['name']
             # take a snapshot of the current env
-            env_copy = copy.deepcopy(self.env)
             # delete all symbols with the same name as parameters
+            name_lst = []
             for arg in assn.get('expression').get('args'):
-                env_copy.del_obj(arg.get('name'))
-            assn.get('expression').dict['cap_env'] = self.flatten_env(env_copy)
+                name_lst.append(arg.get('name'))
+            assn.get('expression').dict['cap_env'] = self.flatten_env(self.env, name_lst)
             self.set_var(name, assn.get('expression'))
+            return
+        if e_type == '@':
+            self.set_var(assn.get('name'), {})
+            return
 
     def loop_conditional(self, conditional):
         output = self.execute_expression(conditional)
@@ -693,6 +834,9 @@ class Interpreter(InterpreterBase):
 
         elif statement.elem_type == 'fcall':
             return self.call_function(statement.get('name'), statement.get('args'))
+        
+        elif statement.elem_type == 'mcall':
+            return self.call_method(statement.get('objref'), statement.get('name'), statement.get('args'))
         
         elif statement.elem_type == 'if':
             self.env.new_block()
@@ -737,18 +881,20 @@ class Interpreter(InterpreterBase):
 
 def main():
     program = """
-func foo(a) {
-    return lambda(b) { return lambda (c) {return a * b * c;};};
+func foo()
+{
+    print("hello");
 }
-
-func main() {
-    x = 3;
-    y = 6;
-    z = 10;
-    p = foo(x);
-    q = p(y);
-    r = q(z);
-    print(r);  
+func main()
+{
+    a = @;
+    a.x = lambda(b) { print("hi"); };
+    /*a.x(2); */
+    a.bar = foo;
+    a.bar();
+    b = @;
+    b.proto = a;
+    b.bar();
 }
 """
     interp = Interpreter()
