@@ -111,10 +111,12 @@ class Interpreter(InterpreterBase):
                 # WARNING: this will not work with references?
                 if split_name[1] == 'proto':
                     # need to check for primitives
-                    if type(val) in self.primitives:
+                    #if type(val) in self.primitives:
+                    #TODO fix: this is bad stupid and ugly
+                    if type(val) != dict and val is not None:
                         super().error(
                             ErrorType.TYPE_ERROR,
-                            f"Can't assign primitive as a prototype",
+                            f"Can't assign non object as a prototype",
                         )
                 obj[split_name[1]] = val
 
@@ -128,7 +130,7 @@ class Interpreter(InterpreterBase):
     # Parse a single argument
     def parse_single(self, arg):
         # TODO: YOU NEED TO PROCESS LAMBDAs HERE!!!!
-        if arg.elem_type in self.bin_ops or arg.elem_type in self.un_ops or arg.elem_type == 'fcall':
+        if arg.elem_type in self.bin_ops or arg.elem_type in self.un_ops or arg.elem_type == 'fcall' or arg.elem_type == 'mcall':
                 return self.execute_expression(arg)
         elif arg.elem_type == 'var':
             return self.get_var(arg.get('name'))
@@ -301,6 +303,8 @@ class Interpreter(InterpreterBase):
     
     #searches the object and the prototye for a function/var
     def method_search(self, obj, name):
+        if obj == None:
+            return None, False
         if name in obj:
             return obj[name], True
         if 'proto' in obj:
@@ -699,6 +703,8 @@ class Interpreter(InterpreterBase):
             return expr
         #TODO handle objects? are they handled by the var if statement above?
         #TODO handle MCALLSF
+        if expr.elem_type == "mcall":
+            return self.call_method(expr.get('objref'), expr.get('name'), expr.get('args'))
         if expr.elem_type == 'nil':
             return None
         # taking care of the binary operations
@@ -893,15 +899,13 @@ class Interpreter(InterpreterBase):
 
 def main():
     program = """
-func foo()
-{
-  this = 7;
-}
 func main() {
-	a = @;
-	a.bar = foo;
-	a.bar();
-	print(a);
+  a = @;
+  a.self = a;
+  a.foo = lambda() { return 96; };
+  b = a.self;
+  c = b.self;
+  print(c.foo());
 }
 """
     interp = Interpreter()
